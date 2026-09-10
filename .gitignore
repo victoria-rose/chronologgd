@@ -1,0 +1,7 @@
+node_modules/
+dist/
+build/
+.starlight/
+.millennium/
+*.log
+.DS_Store

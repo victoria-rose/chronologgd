@@ -1,0 +1,28 @@
+[plugin]
+id = "com.victoria.backloggd_sync"
+name = "Backloggd Sync"
+version = "1.0.0"
+author = "Victoria"
+description = "Automatically logs individual Steam play sessions to Backloggd calendar and journal."
+
+[assets]
+resources = ["resources/**/*"]
+
+[backend]
+entry = "backend/main.lua"
+sources = ["backend/**/*.lua"]
+
+[frontend]
+entry = "frontend/index.tsx"
+
+[compiler]
+output_path = "auto"
+
+[dev]
+auto_restart = true
+reload_steamui_when = "both"
+
+[logger]
+padding = 0
+backend_prefix = "BCK"
+frontend_prefix = "FRT"
