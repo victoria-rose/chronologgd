@@ -106,40 +106,35 @@ export class NotificationManager {
         ? '#faad14'
         : '#1890ff';
 
-    const iconSvg =
+    const iconPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    iconPath.setAttribute('d',
       type === 'success'
-        ? '<path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97 4.03a.75.75 0 0 0 1.08.02l3.992-4.99a.75.75 0 0 0-1.07-1.05l-3.47 4.337-1.543-1.543a.75.75 0 0 0-1.06 1.06l2.071 2.166z"/>'
+        ? 'M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97 4.03a.75.75 0 0 0 1.08.02l3.992-4.99a.75.75 0 0 0-1.07-1.05l-3.47 4.337-1.543-1.543a.75.75 0 0 0-1.06 1.06l2.071 2.166z'
         : type === 'error'
-        ? '<path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM5.354 4.646a.5.5 0 1 0-.708.708L7.293 8l-2.647 2.646a.5.5 0 0 0 .708.708L8 8.707l2.646 2.647a.5.5 0 0 0 .708-.708L8.707 8l2.647-2.646a.5.5 0 0 0-.708-.708L8 7.293 5.354 4.646z"/>'
-        : '<path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm.93-9.412-1 4.705c-.07.34.029.533.304.533.194 0 .487-.07.686-.246l-.088.416c-.287.346-.92.598-1.465.598-.703 0-1.002-.422-.808-1.319l.738-3.468c.064-.293.006-.399-.287-.47l-.451-.081.082-.381 2.29-.287zM8 5.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/>';
+        ? 'M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM5.354 4.646a.5.5 0 1 0-.708.708L7.293 8l-2.647 2.646a.5.5 0 0 0 .708.708L8 8.707l2.646 2.647a.5.5 0 0 0 .708-.708L8.707 8l2.647-2.646a.5.5 0 0 0-.708-.708L8 7.293 5.354 4.646z'
+        : 'M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm.93-9.412-1 4.705c-.07.34.029.533.304.533.194 0 .487-.07.686-.246l-.088.416c-.287.346-.92.598-1.465.598-.703 0-1.002-.422-.808-1.319l.738-3.468c.064-.293.006-.399-.287-.47l-.451-.081.082-.381 2.29-.287zM8 5.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z');
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('width', '20');
+    icon.setAttribute('height', '20');
+    icon.setAttribute('fill', accentColor);
+    icon.setAttribute('viewBox', '0 0 16 16');
+    icon.setAttribute('style', 'flex-shrink: 0; margin-top: 1px;');
+    icon.appendChild(iconPath);
 
-    toast.style.cssText = `
-      pointer-events: auto;
-      background: rgba(23, 29, 37, 0.95);
-      border-left: 4px solid ${accentColor};
-      border-radius: 6px;
-      padding: 12px 16px;
-      color: #e5e5e5;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      backdrop-filter: blur(8px);
-      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-      transform: translateY(20px);
-      opacity: 0;
-      user-select: none;
-    `;
+    // Title/message use textContent: game titles come from Steam/Backloggd and must not parse as HTML.
+    const titleEl = document.createElement('span');
+    titleEl.textContent = title;
+    titleEl.setAttribute('style', 'font-size: 13px; font-weight: 600; color: #ffffff;');
+    const messageEl = document.createElement('span');
+    messageEl.textContent = message;
+    messageEl.setAttribute('style', 'font-size: 12px; color: #9da3a8; line-height: 1.4;');
+    const textWrap = document.createElement('div');
+    textWrap.setAttribute('style', 'display: flex; flex-direction: column; gap: 2px;');
+    textWrap.appendChild(titleEl);
+    textWrap.appendChild(messageEl);
 
-    toast.innerHTML = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="${accentColor}" viewBox="0 0 16 16" style="flex-shrink: 0; margin-top: 1px;">
-        ${iconSvg}
-      </svg>
-      <div style="display: flex; flex-direction: column; gap: 2px;">
-        <span style="font-size: 13px; font-weight: 600; color: #ffffff;">${title}</span>
-        <span style="font-size: 12px; color: #9da3a8; line-height: 1.4;">${message}</span>
-      </div>
-    `;
+    toast.appendChild(icon);
+    toast.appendChild(textWrap);
 
     container.appendChild(toast);
 

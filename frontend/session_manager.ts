@@ -65,10 +65,13 @@ export class SessionManager {
   public static readonly SETTINGS_KEY = 'backloggd_plugin_settings';
   public static readonly QUEUE_KEY = 'backloggd_sync_queue';
   public static readonly HISTORY_KEY = 'backloggd_sync_history';
-
+  /** Queued sessions past this many attempts are dropped to history instead of retried forever. */
+  public static readonly MAX_QUEUE_ATTEMPTS = 5;
   private static activeSessions = new Map<number, { startTime: number; appId: number }>();
   private static lifetimeRegistration: LifetimeRegistration | null = null;
   private static isDraining = false;
+  private static isInitialized = false;
+  private static onlineListener: (() => void) | null = null;
   public static notifyChange(): void {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('backloggd_data_updated'));
@@ -190,6 +193,8 @@ export class SessionManager {
    * Register SteamClient AppLifetimeNotifications listener
    */
   public static initialize(): void {
+    if (this.isInitialized) return;
+    this.isInitialized = true;
     const globalWindow = window as unknown as { SteamClient?: GlobalSteamGameSessions };
     const gameSessions = globalWindow.SteamClient?.GameSessions;
 
@@ -208,9 +213,10 @@ export class SessionManager {
     }
 
     // Auto-drain queue on network reconnect
-    window.addEventListener('online', () => {
+    this.onlineListener = () => {
       void this.drainQueue();
-    });
+    };
+    window.addEventListener('online', this.onlineListener);
 
     // Auto-drain queue on startup
     void this.drainQueue();
@@ -228,6 +234,11 @@ export class SessionManager {
       }
     }
     this.lifetimeRegistration = null;
+    if (this.onlineListener) {
+      window.removeEventListener('online', this.onlineListener);
+      this.onlineListener = null;
+    }
+    this.isInitialized = false;
     this.activeSessions.clear();
   }
 
@@ -325,7 +336,13 @@ export class SessionManager {
         session,
       });
 
-      // 4. Record history
+      // 4. Persist a refreshed CSRF token (syncSession refreshes it on 401/403/422 retry)
+      if (session.csrfToken && session.csrfToken !== settings.csrfToken) {
+        settings.csrfToken = session.csrfToken;
+        this.saveSettings(settings);
+      }
+
+      // 5. Record history
       this.appendHistory({
         id: `hist_${Date.now()}_${appId}`,
         appId,
@@ -338,12 +355,12 @@ export class SessionManager {
         success: true,
       });
 
-      // 5. Success Toast
+      // 6. Success Toast
       if (settings.showToasts) {
         NotificationManager.showSyncSuccessToast(gameTitle, durationSec);
       }
 
-      // 6. Auto-drain queue
+      // 7. Auto-drain queue
       if (settings.autoRetryQueue) {
         void this.drainQueue();
       }
@@ -428,18 +445,17 @@ export class SessionManager {
     };
 
     for (const item of queue) {
+      let gameId = item.gameId;
       try {
-        let gameId = item.gameId;
         if (!gameId) {
           const mapping = await GameMatcher.resolveGame(item.appId, session);
           gameId = mapping.gameId;
         }
 
-        const syncDate = new Date(item.dateStr);
         const result = await BackloggdClient.syncSession({
           gameId,
           durationSec: item.durationSec,
-          date: isNaN(syncDate.getTime()) ? undefined : syncDate,
+          dateStr: item.dateStr,
           session,
         });
 
@@ -463,14 +479,30 @@ export class SessionManager {
       } catch (err: unknown) {
         failed++;
         const errorMsg = err instanceof Error ? err.message : String(err);
-        remainingQueue.push({
-          ...item,
-          attempts: item.attempts + 1,
-          lastError: errorMsg,
-        });
+        const attempts = item.attempts + 1;
+        if (attempts > SessionManager.MAX_QUEUE_ATTEMPTS) {
+          // Dead entry (unmappable game, deleted log, …): stop retrying, keep it visible in history.
+          this.appendHistory({
+            id: `hist_${Date.now()}_${item.appId}`,
+            appId: item.appId,
+            gameTitle: item.gameTitle,
+            gameId: gameId || item.gameId || '',
+            dateStr: item.dateStr,
+            durationSec: item.durationSec,
+            timestamp: Date.now(),
+            accumulated: false,
+            success: false,
+            error: `Dropped after ${attempts} attempts: ${errorMsg}`,
+          });
+        } else {
+          remainingQueue.push({
+            ...item,
+            attempts,
+            lastError: errorMsg,
+          });
+        }
       }
     }
-
     this.saveQueue(remainingQueue);
     this.isDraining = false;
 

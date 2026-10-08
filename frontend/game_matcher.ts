@@ -115,7 +115,11 @@ export class GameMatcher {
   }
 
   /**
-   * Find the best match among Backloggd search results for a given target title
+   * Find the best match among Backloggd search results for a given target title.
+   * Only exact and prefix matches are confident enough to auto-cache: substring
+   * matches and the top result are often the wrong game ("Doom" vs "Doom Eternal"),
+   * and a wrong auto-match silently logs every future session to the wrong title.
+   * Returns null when nothing is confident — the caller must ask for manual mapping.
    */
   public static selectBestMatch(
     targetTitle: string,
@@ -141,16 +145,8 @@ export class GameMatcher {
       }
     }
 
-    // 3. Substring match
-    for (const r of results) {
-      const normalizedResult = r.title.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (normalizedResult.includes(normalizedTarget) || normalizedTarget.includes(normalizedResult)) {
-        return r;
-      }
-    }
-
-    // 4. Default to highest ranked result
-    return results[0];
+    // 3. No confident match — do NOT fall back to substring/top result.
+    return null;
   }
 
   /**
@@ -184,8 +180,12 @@ export class GameMatcher {
       throw new Error(`No matching game found on Backloggd for "${steamTitle}" (AppID: ${appId})`);
     }
 
-    // 4. Pick best match
-    const bestMatch = this.selectBestMatch(cleanTitle, results) || results[0];
+    // 4. Pick best match — null means ambiguous, queue for manual mapping instead of guessing
+    const bestMatch = this.selectBestMatch(cleanTitle, results);
+    if (!bestMatch) {
+      const candidates = results.slice(0, 3).map((r) => `"${r.title}"`).join(', ');
+      throw new Error(`Ambiguous Backloggd match for "${steamTitle}" (AppID: ${appId}), candidates: ${candidates}. Set the mapping manually in settings.`);
+    }
 
     // 5. Store in cache
     const mapping: CachedGameMapping = {

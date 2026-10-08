@@ -56,6 +56,15 @@ export class BackloggdClient {
   private static readonly BASE_URL = 'https://backloggd.com';
   private static readonly USER_AGENT =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+  /**
+   * BunnyCDN shield in front of backloggd.com rejects requests without
+   * browser-like headers (403 + challenge page). Accept-Language is the
+   * load-bearing one; include it on every request.
+   */
+  private static readonly SHIELD_HEADERS: Record<string, string> = {
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Upgrade-Insecure-Requests': '1',
+  };
 
   /**
    * Format a Date into Backloggd's expected YYYY-MM-DD string format
@@ -200,10 +209,11 @@ export class BackloggdClient {
       typeof backend !== 'undefined'
         ? backend
         : (window as unknown as { backend?: typeof backend }).backend;
+    const mergedHeaders: Record<string, string> = { ...BackloggdClient.SHIELD_HEADERS, ...(options.headers || {}) };
 
     if (globalBackend?.httpRequest) {
       try {
-        const headersJson = JSON.stringify(options.headers || {});
+        const headersJson = JSON.stringify(mergedHeaders);
         const rawResp = await globalBackend.httpRequest(
           url,
           options.method || 'GET',
@@ -246,7 +256,7 @@ export class BackloggdClient {
     }
 
     // Fallback to native fetch (e.g. unit tests / Bun / Node)
-    const res = await fetch(url, options);
+    const res = await fetch(url, { ...options, headers: mergedHeaders });
     return {
       status: res.status,
       ok: res.ok,
@@ -300,11 +310,17 @@ export class BackloggdClient {
         },
       });
 
+      if (res.status === 403) {
+        return { valid: false, error: 'Backloggd blocked the request (403 bot check). Update the plugin — or retry; the shield sometimes clears on a second attempt.' };
+      }
       if (res.status !== 200) {
         return { valid: false, error: `Backloggd returned status ${res.status}` };
       }
 
       const html = await res.text();
+      if (html.includes('bunny-shield') || html.includes('Establishing a secure connection')) {
+        return { valid: false, error: 'Backloggd showed a bot check instead of the site. Retry — the shield usually clears on a second attempt.' };
+      }
 
       // Check if redirected to sign in or if user is unauthenticated
       if (html.includes('/users/sign_in') && !html.includes('/u/')) {
@@ -431,10 +447,11 @@ export class BackloggdClient {
 
     let res = await this.request(url, { headers });
 
-    // If unauthorized or rejected, attempt one refresh with a fresh CSRF token
-    if ((res.status === 401 || res.status === 403 || res.status === 422) && !session.csrfToken) {
+    // If unauthorized or rejected, attempt one refresh with a fresh CSRF token.
+    // Retry whenever the token is missing OR stale (differs from what we sent).
+    if (res.status === 401 || res.status === 403 || res.status === 422) {
       const freshCsrf = await this.fetchFreshCsrfToken(cleanCookie);
-      if (freshCsrf) {
+      if (freshCsrf && freshCsrf !== headers['X-CSRF-Token']) {
         session.csrfToken = freshCsrf;
         headers['X-CSRF-Token'] = freshCsrf;
         res = await this.request(url, { headers });
@@ -492,11 +509,13 @@ export class BackloggdClient {
     durationSec: number;
     session: BackloggdSession;
     date?: Date;
+    /** Pre-formatted YYYY-MM-DD; preferred for queued retries (avoids UTC round-trip shift). */
+    dateStr?: string;
     note?: string;
   }): Promise<SyncResult> {
     const { gameId, durationSec, session, note } = params;
-    const sessionDate = params.date || new Date();
-    const dateStr = this.formatDate(sessionDate);
+    const dateStr = params.dateStr || this.formatDate(params.date || new Date());
+    const sessionDate = params.date || (params.dateStr ? new Date(`${params.dateStr}T12:00:00`) : new Date());
     const nextDayStr = this.getNextDay(sessionDate);
 
     // Calculate hours and minutes from duration
